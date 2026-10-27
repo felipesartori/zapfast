@@ -7947,10 +7947,9 @@ impl App {
             // `Event::ChatCleared`; the chat stays either way.
             Action::ClearChat(chat) => self.backend.send(Command::ClearChat(chat)),
             Action::SetPinned(chat, pinned) => {
-                if pinned && self.pinned_count() >= self.pin_limit {
-                    self.toast(format!("You can only pin {} chats", self.pin_limit));
-                    return;
-                }
+                // Past WhatsApp's limit the pin stays on this device: the
+                // phone would refuse it.
+                let phone = !pinned || self.pinned_count() < self.pin_limit;
                 if let Some(known) = self.chat_mut(&chat) {
                     known.pinned = pinned;
                     known.pinned_at = if pinned {
@@ -7959,7 +7958,11 @@ impl App {
                         0
                     };
                 }
-                self.backend.send(Command::SetPinned(chat, pinned));
+                self.backend.send(Command::SetPinned {
+                    chat,
+                    pinned,
+                    phone,
+                });
             }
             Action::SetMessagePinned {
                 chat,
@@ -16861,7 +16864,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fourth_pin_is_refused_like_on_the_phone() {
+    fn a_pin_past_the_limit_stays_on_this_device() {
         let mut app = app();
         let (backend, mut commands) = Backend::recording();
         app.backend = backend;
@@ -16871,21 +16874,21 @@ mod tests {
             chat.archived = index == 4;
             app.chats.push(chat);
         }
-        app.apply(
-            Action::SetPinned("3@s.whatsapp.net".into(), true),
-            &egui::Context::default(),
-        );
-        assert!(!app.chat("3@s.whatsapp.net").unwrap().pinned);
-        assert!(commands.try_recv().is_err());
-        app.apply(
-            Action::SetPinned("0@s.whatsapp.net".into(), false),
-            &egui::Context::default(),
-        );
-        app.apply(
-            Action::SetPinned("3@s.whatsapp.net".into(), true),
-            &egui::Context::default(),
-        );
+        let mut pin = |app: &mut App, chat: &str, pinned: bool| {
+            app.apply(
+                Action::SetPinned(chat.into(), pinned),
+                &egui::Context::default(),
+            );
+            match commands.try_recv() {
+                Ok(Command::SetPinned { phone, .. }) => phone,
+                other => panic!("expected a pin command, got {other:?}"),
+            }
+        };
+        assert!(!pin(&mut app, "3@s.whatsapp.net", true));
         assert!(app.chat("3@s.whatsapp.net").unwrap().pinned);
+        assert!(pin(&mut app, "3@s.whatsapp.net", false));
+        assert!(pin(&mut app, "0@s.whatsapp.net", false));
+        assert!(pin(&mut app, "3@s.whatsapp.net", true));
     }
 
     #[test]

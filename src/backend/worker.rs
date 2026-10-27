@@ -7796,17 +7796,23 @@ impl Worker {
                     ));
                 }
             }
-            Command::SetPinned(chat, pinned) => {
+            Command::SetPinned {
+                chat,
+                pinned,
+                phone,
+            } => {
                 let _ = self.archive.set_pinned(&chat, pinned);
                 self.emit_chat(&chat);
-                self.tell_phone(&chat, move |client, jid| async move {
-                    if pinned {
-                        client.chat_actions().pin_chat(&jid).await
-                    } else {
-                        client.chat_actions().unpin_chat(&jid).await
-                    }
-                    .map_err(|error| error.to_string())
-                });
+                if phone {
+                    self.tell_phone(&chat, move |client, jid| async move {
+                        if pinned {
+                            client.chat_actions().pin_chat(&jid).await
+                        } else {
+                            client.chat_actions().unpin_chat(&jid).await
+                        }
+                        .map_err(|error| error.to_string())
+                    });
+                }
             }
             Command::SetMessagePinned {
                 chat,

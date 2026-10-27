@@ -826,7 +826,13 @@ pub enum Command {
         cleared: bool,
         through: i64,
     },
-    SetPinned(ChatId, bool),
+    /// Pins or unpins a chat. `phone` is false for a pin past WhatsApp's
+    /// limit, which stays on this device only.
+    SetPinned {
+        chat: ChatId,
+        pinned: bool,
+        phone: bool,
+    },
     /// Pins or unpins one message for everyone in the chat.
     SetMessagePinned {
         chat: ChatId,
