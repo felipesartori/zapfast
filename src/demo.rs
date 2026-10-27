@@ -13877,6 +13877,56 @@ mod tests {
         );
     }
 
+    /// Beside the Smile control, a hovered message offers Reply, Forward and
+    /// Copy text, each a step further out.
+    #[test]
+    fn hovering_a_message_offers_forward_and_copy_text() {
+        let mut app = app();
+        let chat = sample_ids()[0].to_owned();
+        app.conversations.get_mut(&chat).unwrap().messages =
+            vec![message(&chat, "text", false, 100, Content::text("Copy me"))];
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        for _ in 0..3 {
+            render(&mut app, &ctx);
+        }
+        let id = crate::ui::conversation::bubble_id(&chat, "text");
+        let bubble = ctx
+            .data(|data| data.get_temp::<egui::Rect>(id.with("rect")))
+            .expect("the bubble publishes its rect");
+        let react = ctx
+            .data(|data| data.get_temp::<egui::Rect>(id.with("react-rect")))
+            .expect("the hover control publishes its rect");
+        let click = |app: &mut App, steps: f32| {
+            let at = react.center() + egui::vec2(steps * (react.width() + 4.0), 0.0);
+            frame_with(app, &ctx, vec![egui::Event::PointerMoved(bubble.center())]);
+            frame_with(app, &ctx, vec![egui::Event::PointerMoved(at)]);
+            for pressed in [true, false] {
+                frame_with(
+                    app,
+                    &ctx,
+                    vec![egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+            }
+        };
+        click(&mut app, 3.0);
+        assert!(
+            app.toasts.iter().any(|toast| toast.message == "Copied"),
+            "the third button copies the text"
+        );
+        click(&mut app, 2.0);
+        assert!(
+            matches!(&app.dialog, Some(Dialog::Forward { messages, .. }) if messages == &["text".to_owned()]),
+            "the second button forwards the message: {:?}",
+            app.dialog.is_some()
+        );
+    }
+
     /// A message scrolled up under the chat header is hidden there, so a
     /// right-click on the header does not open that message's menu.
     #[test]

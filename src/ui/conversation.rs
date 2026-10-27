@@ -4033,6 +4033,28 @@ fn reaction_button_label(from_me: bool, sender: &str) -> String {
     }
 }
 
+/// The text "Copy text" puts on the clipboard, when the message has any.
+fn copyable_text(message: &Message) -> Option<String> {
+    match &message.content {
+        Content::Text { text, .. } | Content::Interactive { text, .. } => Some(text.clone()),
+        Content::Image { caption, .. }
+        | Content::Video { caption, .. }
+        | Content::Document { caption, .. } => caption.clone(),
+        Content::Location {
+            latitude,
+            longitude,
+            ..
+        }
+        | Content::LiveLocation {
+            latitude,
+            longitude,
+            ..
+        } => Some(format!("{latitude},{longitude}")),
+        Content::Contact { vcard, .. } => Some(vcard.clone()),
+        _ => None,
+    }
+}
+
 /// Draws a Smile control beside a hovered message and opens the existing picker.
 fn reaction_affordance(
     ui: &mut egui::Ui,
@@ -4080,25 +4102,35 @@ fn reaction_affordance(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &label)
     });
     theme::reveal_focus(&response);
-    // Reply sits one step further out, where the chat accepts messages.
+    // Reply, Forward and Copy text sit a step further out each: Reply where
+    // the chat accepts messages, the others as in the message menu.
     let can_reply = view.chat.can_send()
         && !matches!(
             message.content,
             Content::Revoked | Content::PhoneOnly { .. }
         );
+    let copy = copyable_text(message);
+    let mut extras: Vec<(Icon, &str)> = Vec::new();
+    if can_reply {
+        extras.push((Icon::Reply, "Reply"));
+    }
+    if crate::app::can_select(&message.content) {
+        extras.push((Icon::Forward, "Forward"));
+    }
+    if copy.is_some() {
+        extras.push((Icon::Copy, "Copy text"));
+    }
     let step = REACTION_AFFORDANCE_SIZE + 4.0;
     let outward = if rect.center().x < bubble.rect.center().x {
         -step
     } else {
         step
     };
-    let reply_rect = rect.translate(vec2(outward, 0.0));
-    let reply_fits = can_reply && bounds.contains_rect(reply_rect);
-    let reach = if reply_fits {
-        rect.union(reply_rect)
-    } else {
-        rect
-    };
+    let rects: Vec<Rect> = (1..=extras.len())
+        .map(|index| rect.translate(vec2(outward * index as f32, 0.0)))
+        .take_while(|at| bounds.contains_rect(*at))
+        .collect();
+    let reach = rects.iter().fold(rect, |reach, at| reach.union(*at));
     let revealed = reaction_affordance_visible(pointer, shown, reach);
     if ui.is_rect_visible(rect) && (response.has_focus() || (uncovered && revealed)) {
         floating_circle(ui, &view.palette, rect, response.hovered());
@@ -4121,34 +4153,45 @@ fn reaction_affordance(
     {
         actions.push(open_reaction_picker_action(&view.chat.id, &message.id));
     }
-    if !reply_fits {
-        return;
-    }
-    let reply = ui.interact(reply_rect, bubble.id.with("reply"), Sense::click());
-    reply.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Reply")
-    });
-    theme::reveal_focus(&reply);
-    if ui.is_rect_visible(reply_rect) && (reply.has_focus() || (uncovered && revealed)) {
-        floating_circle(ui, &view.palette, reply_rect, reply.hovered());
-        theme::paint_icon(
-            ui,
-            Icon::Reply,
-            reply_rect.shrink(5.0),
-            15.0,
-            if reply.hovered() {
-                view.palette.text
-            } else {
-                view.palette.secondary
-            },
-        );
-    }
-    if reply
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text("Reply")
-        .clicked()
-    {
-        actions.push(Action::Reply(message.id.clone()));
+    for ((icon, name), at) in extras.into_iter().zip(rects) {
+        let label = crate::i18n::gettext(view.locale, name);
+        let button = ui.interact(at, bubble.id.with(name.to_lowercase()), Sense::click());
+        button.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &label)
+        });
+        theme::reveal_focus(&button);
+        if ui.is_rect_visible(at) && (button.has_focus() || (uncovered && revealed)) {
+            floating_circle(ui, &view.palette, at, button.hovered());
+            theme::paint_icon(
+                ui,
+                icon,
+                at.shrink(5.0),
+                15.0,
+                if button.hovered() {
+                    view.palette.text
+                } else {
+                    view.palette.secondary
+                },
+            );
+        }
+        if !button
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(label.as_ref())
+            .clicked()
+        {
+            continue;
+        }
+        actions.push(match icon {
+            Icon::Reply => Action::Reply(message.id.clone()),
+            Icon::Forward => Action::ShowDialog(Dialog::Forward {
+                chat: view.chat.id.clone(),
+                messages: vec![message.id.clone()],
+            }),
+            _ => Action::CopyText(markup::plain(
+                copy.as_deref().unwrap_or_default(),
+                &mentions_of(view, message),
+            )),
+        });
     }
 }
 
@@ -6468,24 +6511,7 @@ fn context_menu(
         }
         actions.push(Action::SelectMessage(message.id.clone()));
     }
-    let text = match &message.content {
-        Content::Text { text, .. } | Content::Interactive { text, .. } => Some(text.clone()),
-        Content::Image { caption, .. }
-        | Content::Video { caption, .. }
-        | Content::Document { caption, .. } => caption.clone(),
-        Content::Location {
-            latitude,
-            longitude,
-            ..
-        }
-        | Content::LiveLocation {
-            latitude,
-            longitude,
-            ..
-        } => Some(format!("{latitude},{longitude}")),
-        Content::Contact { vcard, .. } => Some(vcard.clone()),
-        _ => None,
-    };
+    let text = copyable_text(message);
     if let Some(text) = text
         && widgets::menu_item(
             ui,
