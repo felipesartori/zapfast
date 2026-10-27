@@ -7964,6 +7964,39 @@ impl App {
                     phone,
                 });
             }
+            Action::MovePin(chat, up) => {
+                // The list shows pins newest first, so the one above sorts
+                // under a later time.
+                let mut pins: Vec<(i64, ChatId)> = self
+                    .chats
+                    .iter()
+                    .filter(|known| known.pinned && !known.archived)
+                    .map(|known| (known.pinned_at, known.id.clone()))
+                    .collect();
+                pins.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+                let Some(index) = pins.iter().position(|(_, id)| *id == chat) else {
+                    return;
+                };
+                let Some(other) = (if up {
+                    index.checked_sub(1)
+                } else {
+                    Some(index + 1).filter(|next| *next < pins.len())
+                }) else {
+                    return;
+                };
+                let (upper, lower) = (index.min(other), index.max(other));
+                // Equal times would tie and sort by id, so keep them apart.
+                let (top, bottom) = (pins[upper].0.max(pins[lower].0 + 1), pins[lower].0);
+                for (id, at) in [
+                    (pins[lower].1.clone(), top),
+                    (pins[upper].1.clone(), bottom),
+                ] {
+                    if let Some(known) = self.chat_mut(&id) {
+                        known.pinned_at = at;
+                    }
+                    self.backend.send(Command::SetPinOrder { chat: id, at });
+                }
+            }
             Action::SetMessagePinned {
                 chat,
                 message,
@@ -16861,6 +16894,34 @@ mod tests {
         app.apply(Action::ToggleNewGroupMember(ada.into()), &ctx);
         app.apply(Action::ToggleNewGroupMember(ada.into()), &ctx);
         assert!(app.new_group.is_none());
+    }
+
+    #[test]
+    fn moving_a_pin_swaps_it_with_its_neighbour() {
+        let mut app = app();
+        let (backend, _commands) = Backend::recording();
+        app.backend = backend;
+        for (index, at) in [30, 20, 20, 10].into_iter().enumerate() {
+            let mut chat = Chat::new(format!("{index}@s.whatsapp.net"), format!("Chat {index}"));
+            chat.pinned = true;
+            chat.pinned_at = at;
+            app.chats.push(chat);
+        }
+        let order = |app: &App| {
+            app.visible_chats()
+                .iter()
+                .map(|chat| chat.id.chars().next().unwrap())
+                .collect::<String>()
+        };
+        assert_eq!(order(&app), "0123");
+        let ctx = egui::Context::default();
+        app.apply(Action::MovePin("0@s.whatsapp.net".into(), false), &ctx);
+        assert_eq!(order(&app), "1023");
+        app.apply(Action::MovePin("2@s.whatsapp.net".into(), true), &ctx);
+        assert_eq!(order(&app), "1203");
+        app.apply(Action::MovePin("1@s.whatsapp.net".into(), true), &ctx);
+        app.apply(Action::MovePin("3@s.whatsapp.net".into(), false), &ctx);
+        assert_eq!(order(&app), "1203", "the ends stay put");
     }
 
     #[test]

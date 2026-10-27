@@ -1739,6 +1739,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             "Mark as read",
             "Mark as unread",
             "Pin to top",
+            "Move down",
             favorite_label.as_ref(),
             "Unarchive",
             &crate::i18n::gettext(app.locale, "Leave group"),
@@ -2119,6 +2120,14 @@ fn context_menu(app: &mut App, ui: &mut egui::Ui, chat: &Chat, palette: &Palette
     ) {
         app.actions
             .push(Action::SetPinned(chat.id.clone(), !chat.pinned));
+    }
+    if chat.pinned && !chat.archived {
+        if widgets::menu_item(ui, palette, Some(Icon::ChevronUp), "Move up") {
+            app.actions.push(Action::MovePin(chat.id.clone(), true));
+        }
+        if widgets::menu_item(ui, palette, Some(Icon::ChevronDown), "Move down") {
+            app.actions.push(Action::MovePin(chat.id.clone(), false));
+        }
     }
     // Channels cannot be favorites, as on the phone.
     if !chat.is_channel() {

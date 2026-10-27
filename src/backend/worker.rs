@@ -7814,6 +7814,10 @@ impl Worker {
                     });
                 }
             }
+            Command::SetPinOrder { chat, at } => {
+                let _ = self.archive.set_pin_order(&chat, at);
+                self.emit_chat(&chat);
+            }
             Command::SetMessagePinned {
                 chat,
                 message,

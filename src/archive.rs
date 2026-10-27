@@ -700,6 +700,16 @@ impl Archive {
         Ok(())
     }
 
+    /// Moves a pinned chat to another place among the pins, leaving the time
+    /// that guards it against older sync alone.
+    pub fn set_pin_order(&self, id: &str, at: i64) -> Result<()> {
+        self.connection.execute(
+            "UPDATE chats SET pinned_at = ?2 WHERE id = ?1 AND pinned",
+            params![id, at],
+        )?;
+        Ok(())
+    }
+
     pub fn set_muted(&self, id: &str, until: Option<i64>) -> Result<()> {
         self.set_muted_at(id, until, jiff::Timestamp::now().as_millisecond())
     }

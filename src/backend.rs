@@ -833,6 +833,11 @@ pub enum Command {
         pinned: bool,
         phone: bool,
     },
+    /// Reorders a pinned chat here only, by the time it sorts under.
+    SetPinOrder {
+        chat: ChatId,
+        at: i64,
+    },
     /// Pins or unpins one message for everyone in the chat.
     SetMessagePinned {
         chat: ChatId,

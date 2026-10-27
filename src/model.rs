@@ -2912,6 +2912,9 @@ pub enum Action {
     /// Clears a chat's messages here and on the phone, keeping the chat.
     ClearChat(ChatId),
     SetPinned(ChatId, bool),
+    /// Swaps a pinned chat with the pinned one above (`true`) or below it.
+    /// The order stays on this device: WhatsApp has no way to reorder pins.
+    MovePin(ChatId, bool),
     /// Pins or unpins one message for everyone in the chat.
     SetMessagePinned {
         chat: ChatId,
