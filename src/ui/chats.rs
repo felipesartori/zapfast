@@ -1445,6 +1445,11 @@ fn person_row(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// The round archive button a pointed-at chat row shows.
+const ARCHIVE_BUTTON: f32 = 32.0;
+/// Room kept right of the archive button for the time and badges.
+const ARCHIVE_COLUMN: f32 = 56.0;
+
 fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
     let palette = app.palette;
     let title = app.chat_title(chat);
@@ -1463,6 +1468,28 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
         Sense::click(),
     );
     theme::reveal_focus(&response);
+    // While the row is pointed at, a round button archives or unarchives the
+    // chat, as on WhatsApp. Registered after the row, so it takes the clicks
+    // over it.
+    let archive_rect = Rect::from_center_size(
+        pos2(
+            rect.right() - 14.0 - ARCHIVE_COLUMN - ARCHIVE_BUTTON / 2.0,
+            rect.center().y,
+        ),
+        Vec2::splat(ARCHIVE_BUTTON),
+    );
+    let archive_label = if chat.archived {
+        crate::i18n::gettext(app.locale, "Unarchive")
+    } else {
+        crate::i18n::gettext(app.locale, "Archive")
+    };
+    let archive = ui.rect_contains_pointer(rect).then(|| {
+        let archive = ui.interact(archive_rect, response.id.with("archive"), Sense::click());
+        archive.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &archive_label)
+        });
+        archive
+    });
     // The preview area and the whole last message, when the row cuts it short.
     let mut full_preview: Option<(Rect, String, String)> = None;
     response.widget_info(|| {
@@ -1476,7 +1503,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
     if ui.is_rect_visible(rect) {
         if selected {
             widgets::row_highlight(ui, &palette, rect, palette.surface_active);
-        } else if response.hovered() {
+        } else if response.hovered() || archive.as_ref().is_some_and(|b| b.hovered()) {
             widgets::row_highlight(ui, &palette, rect, palette.surface_hover);
         }
         let avatar_rect =
@@ -1516,7 +1543,10 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             stamp_galley.clone(),
             stamp_color,
         );
-        let name_width = (right - stamp_galley.size().x - 8.0 - left).max(0.0);
+        let mut name_width = (right - stamp_galley.size().x - 8.0 - left).max(0.0);
+        if archive.is_some() {
+            name_width = name_width.min((archive_rect.left() - 8.0 - left).max(0.0));
+        }
         let name_font = if unread {
             theme::semibold(14.5)
         } else {
@@ -1559,6 +1589,11 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             Icon::Pin.image(palette.dim, 14.0).paint_at(ui, icon_rect);
             badge_right -= 20.0;
         }
+        let text_right = if archive.is_some() {
+            badge_right.min(archive_rect.left() - 8.0)
+        } else {
+            badge_right
+        };
         let mut x = left;
         let typing = app.typing_in(&chat.id);
         let preview_color = if unread && !muted {
@@ -1577,7 +1612,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
                 &who,
                 theme::medium(13.0),
                 palette.accent,
-                badge_right - x,
+                text_right - x,
                 1,
             )
         } else if let Some(draft) = app.draft_preview(&chat.id) {
@@ -1588,7 +1623,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
                 &label,
                 theme::medium(13.0),
                 palette.accent,
-                (badge_right - x) * 0.5,
+                (text_right - x) * 0.5,
                 1,
             );
             let width = label.size().x;
@@ -1599,7 +1634,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
                 &draft,
                 theme::regular(13.0),
                 preview_color,
-                (badge_right - x).max(0.0),
+                (text_right - x).max(0.0),
                 1,
             )
         } else if let Some(last) = &chat.last {
@@ -1628,7 +1663,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
                     &prefix,
                     theme::regular(13.0),
                     preview_color,
-                    (badge_right - x) * 0.5,
+                    (text_right - x) * 0.5,
                     1,
                 );
                 let width = sender.size().x;
@@ -1643,7 +1678,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
                 ),
                 theme::regular(13.0),
                 preview_color,
-                (badge_right - x).max(0.0),
+                (text_right - x).max(0.0),
                 1,
             );
             // The row shows one line: offer the whole message when that line
@@ -1651,7 +1686,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             if words.galley.elided || last.full.trim_end() != last.summary {
                 let area = Rect::from_min_max(
                     pos2(left, line_y - 4.0),
-                    pos2(badge_right, line_y + words.size().y.max(16.0) + 4.0),
+                    pos2(text_right, line_y + words.size().y.max(16.0) + 4.0),
                 );
                 full_preview = Some((area, prefix, last.full_in(app.locale).into_owned()));
             }
@@ -1660,10 +1695,32 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             widgets::line(ui, "", theme::regular(13.0), preview_color, 1.0, 1)
         };
         preview.paint(ui, pos2(x, line_y), preview_color);
+        if let Some(archive) = &archive {
+            let fill = if archive.hovered() {
+                palette.surface_active
+            } else {
+                palette.window
+            };
+            ui.painter()
+                .circle_filled(archive_rect.center(), ARCHIVE_BUTTON / 2.0, fill);
+            Icon::Archive.image(palette.accent, 16.0).paint_at(
+                ui,
+                Rect::from_center_size(archive_rect.center(), Vec2::splat(16.0)),
+            );
+        }
     }
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     if let Some((area, prefix, full)) = full_preview {
         full_preview_tooltip(app, ui, &chat.id, area, &prefix, &full);
+    }
+    if let Some(archive) = archive {
+        if archive.clicked() {
+            app.actions
+                .push(Action::SetArchived(chat.id.clone(), !chat.archived));
+        }
+        archive
+            .on_hover_text(archive_label.as_ref())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
     }
     if response.clicked() {
         app.actions.push(Action::OpenChat(chat.id.clone()));
@@ -2784,6 +2841,61 @@ mod tests {
         assert!(
             app.actions.contains(&Action::OpenChat(first.id.clone())),
             "clicking an avatar opens that chat: {:?}",
+            app.actions
+        );
+    }
+
+    /// Pointing at a chat row shows a round button that archives the chat
+    /// instead of opening it.
+    #[test]
+    fn the_hover_button_archives_the_chat_without_opening_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _events) =
+            App::headless(AppDirs::under(directory.path()), Settings::default());
+        let chat = Chat::new("491700000001@s.whatsapp.net".into(), "Alice".into());
+        app.chats.push(chat.clone());
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        let width = 360.0;
+        let mut frame = |events| {
+            let mut rect = Rect::NOTHING;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 400.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| rect = row(&mut app, ui, &chat).rect,
+            );
+            output.textures_delta.clear();
+            rect
+        };
+        let rect = frame(vec![]);
+        let button = pos2(
+            rect.right() - 14.0 - ARCHIVE_COLUMN - ARCHIVE_BUTTON / 2.0,
+            rect.center().y,
+        );
+        frame(vec![egui::Event::PointerMoved(button)]);
+        for pressed in [true, false] {
+            frame(vec![
+                egui::Event::PointerMoved(button),
+                egui::Event::PointerButton {
+                    pos: button,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+        }
+        assert!(
+            app.actions
+                .contains(&Action::SetArchived(chat.id.clone(), true)),
+            "the button archives the chat: {:?}",
+            app.actions
+        );
+        assert!(
+            !app.actions.contains(&Action::OpenChat(chat.id.clone())),
+            "the click stays on the button: {:?}",
             app.actions
         );
     }
